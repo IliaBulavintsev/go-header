@@ -3,6 +3,7 @@ package p2p
 import (
 	"context"
 	"strconv"
+	sync2 "sync"
 	"testing"
 	"time"
 
@@ -154,6 +155,75 @@ func TestExchange_RequestHead_UnresponsivePeer(t *testing.T) {
 	head, err := client.Head(ctx)
 	assert.NoError(t, err)
 	assert.NotNil(t, head)
+}
+
+func TestExchange_RequestHeadFlightProtection(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
+	hosts := createMocknet(t, 3)
+	exchg, trustedStore := createP2PExAndServer(t, hosts[0], hosts[1])
+
+	// create new server-side exchange that will act as the tracked peer
+	// it will have a higher chain head than the trusted peer so that the
+	// test can determine which peer was asked
+	trackedStore := headertest.NewStore[*headertest.DummyHeader](t, headertest.NewTestSuite(t), 50)
+	serverSideEx, err := NewExchangeServer[*headertest.DummyHeader](hosts[2], trackedStore,
+		WithNetworkID[ServerParameters](networkID),
+	)
+	require.NoError(t, err)
+	err = serverSideEx.Start(ctx)
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		err = serverSideEx.Stop(ctx)
+		require.NoError(t, err)
+	})
+	// create the same requests
+	tests := make([]struct {
+		requestFromTrusted bool
+		lastHeader         *headertest.DummyHeader
+		expectedHeight     uint64
+		expectedHash       header.Hash
+	}, 10)
+	for i := 0; i < 10; i++ {
+		tests[i] = struct {
+			requestFromTrusted bool
+			lastHeader         *headertest.DummyHeader
+			expectedHeight     uint64
+			expectedHash       header.Hash
+		}{
+			requestFromTrusted: true,
+			lastHeader:         trustedStore.Headers[trustedStore.HeadHeight-1],
+			expectedHeight:     trustedStore.HeadHeight,
+			expectedHash:       trustedStore.Headers[trustedStore.HeadHeight].Hash(),
+		}
+	}
+
+	var wg sync2.WaitGroup
+	// run over goroutine
+	for i, tt := range tests {
+		wg.Add(1)
+		go func(testStruct struct {
+			requestFromTrusted bool
+			lastHeader         *headertest.DummyHeader
+			expectedHeight     uint64
+			expectedHash       header.Hash
+		}, it int) {
+			defer wg.Done()
+			var opts []header.HeadOption[*headertest.DummyHeader]
+			if !testStruct.requestFromTrusted {
+				opts = append(opts, header.WithTrustedHead[*headertest.DummyHeader](testStruct.lastHeader))
+			}
+
+			h, errG := exchg.Head(ctx, opts...)
+			require.NoError(t, errG)
+
+			assert.Equal(t, testStruct.expectedHeight, h.Height())
+			assert.Equal(t, testStruct.expectedHash, h.Hash())
+
+		}(tt, i)
+	}
+	wg.Wait()
 }
 
 func TestExchange_RequestHeader(t *testing.T) {
