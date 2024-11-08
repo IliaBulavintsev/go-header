@@ -141,7 +141,7 @@ func (ex *Exchange[H]) Head(ctx context.Context, opts ...header.HeadOption[H]) (
 		return head.(H), err
 	}
 	span.SetStatus(codes.Ok, "")
-	return head.(H), err
+	return head.(H), nil
 }
 
 func (ex *Exchange[H]) head(ctx context.Context, span trace.Span, opts ...header.HeadOption[H]) (H, error) {

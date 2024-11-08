@@ -164,39 +164,32 @@ func TestExchange_RequestHeadFlightProtection(t *testing.T) {
 	hosts := createMocknet(t, 3)
 	exchg, trustedStore := createP2PExAndServer(t, hosts[0], hosts[1])
 
-	// create new server-side exchange that will act as the tracked peer
-	// it will have a higher chain head than the trusted peer so that the
-	// test can determine which peer was asked
-	trackedStore := headertest.NewStore[*headertest.DummyHeader](t, headertest.NewTestSuite(t), 50)
-	serverSideEx, err := NewExchangeServer[*headertest.DummyHeader](hosts[2], trackedStore,
-		WithNetworkID[ServerParameters](networkID),
-	)
-	require.NoError(t, err)
-	err = serverSideEx.Start(ctx)
-	require.NoError(t, err)
-	t.Cleanup(func() {
-		err = serverSideEx.Stop(ctx)
-		require.NoError(t, err)
-	})
 	// create the same requests
-	tests := make([]struct {
+	tests := []struct {
 		requestFromTrusted bool
 		lastHeader         *headertest.DummyHeader
 		expectedHeight     uint64
 		expectedHash       header.Hash
-	}, 10)
-	for i := 0; i < 10; i++ {
-		tests[i] = struct {
-			requestFromTrusted bool
-			lastHeader         *headertest.DummyHeader
-			expectedHeight     uint64
-			expectedHash       header.Hash
-		}{
+	}{
+		{
 			requestFromTrusted: true,
 			lastHeader:         trustedStore.Headers[trustedStore.HeadHeight-1],
 			expectedHeight:     trustedStore.HeadHeight,
 			expectedHash:       trustedStore.Headers[trustedStore.HeadHeight].Hash(),
-		}
+		},
+		{
+			requestFromTrusted: true,
+			lastHeader:         trustedStore.Headers[trustedStore.HeadHeight-1],
+			expectedHeight:     trustedStore.HeadHeight,
+			expectedHash:       trustedStore.Headers[trustedStore.HeadHeight].Hash(),
+		},
+		{
+			// request from untrusted peer should be the same as trusted bc of single-preflight
+			requestFromTrusted: false,
+			lastHeader:         trustedStore.Headers[trustedStore.HeadHeight-1],
+			expectedHeight:     trustedStore.HeadHeight,
+			expectedHash:       trustedStore.Headers[trustedStore.HeadHeight].Hash(),
+		},
 	}
 
 	var wg sync2.WaitGroup
@@ -222,6 +215,8 @@ func TestExchange_RequestHeadFlightProtection(t *testing.T) {
 			assert.Equal(t, testStruct.expectedHash, h.Hash())
 
 		}(tt, i)
+		// ensure first Head will be locked by request from trusted peer
+		time.Sleep(time.Microsecond)
 	}
 	wg.Wait()
 }
