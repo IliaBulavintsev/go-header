@@ -178,12 +178,6 @@ func TestExchange_RequestHeadFlightProtection(t *testing.T) {
 			expectedHash:       trustedStore.Headers[trustedStore.HeadHeight].Hash(),
 		},
 		{
-			requestFromTrusted: true,
-			lastHeader:         trustedStore.Headers[trustedStore.HeadHeight-1],
-			expectedHeight:     trustedStore.HeadHeight,
-			expectedHash:       trustedStore.Headers[trustedStore.HeadHeight].Hash(),
-		},
-		{
 			// request from untrusted peer should be the same as trusted bc of single-preflight
 			requestFromTrusted: false,
 			lastHeader:         trustedStore.Headers[trustedStore.HeadHeight-1],
